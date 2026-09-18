@@ -36,19 +36,20 @@ Streamlit Web Interface
 
 ## Project Structure
 
+```
 rag-document-assistant/
-├── documents/ # Source PDFs
-├── ingestion.py # Extracts text from PDFs, page by page
-├── chunking.py # Splits text into overlapping chunks
-├── build_index.py # Builds embeddings and stores them in ChromaDB
-├── test_retrieval.py # Retrieval function + manual retrieval testing
-├── generation.py # Builds prompts and calls the LLM
-├── app.py # Streamlit web interface
+├── documents/              # Source PDFs
+├── ingestion.py            # Extracts text from PDFs, page by page
+├── chunking.py             # Splits text into overlapping chunks
+├── build_index.py          # Builds embeddings and stores them in ChromaDB
+├── test_retrieval.py       # Retrieval function + manual retrieval testing
+├── generation.py           # Builds prompts and calls the LLM
+├── app.py                  # Streamlit web interface
 ├── requirements.txt
-├── .env.example # Sample environment file (no secrets)
+├── .env.example            # Sample environment file (no secrets)
 ├── .gitignore
-└── evaluation.md # Evaluation questions and results
-
+└── evaluation.md           # Evaluation questions and results
+```
 
 ## Setup Instructions
 
