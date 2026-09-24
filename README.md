@@ -107,4 +107,4 @@ rag-document-assistant/
 
 ## Evaluation
 
-See `evaluation.md` for the full set of 20 test questions and results (95% accuracy — 19/20 correct).
+See `evaluation.md` for the full set of 20 test questions and results (100% accuracy — 20/20 correct on the evaluation set).
