@@ -144,8 +144,14 @@ My app showed source files even when it said "not found," which was confusing.
 I fixed this by only showing sources when a real answer was found.
 
 ### 4. New PDF data did not save
-When I added a new PDF without clearing the old data first, the new data silently
-did not save. I fixed this by always clearing the old data before adding new PDFs.
+
+Earlier, I had a problem when adding new PDFs because the old ChromaDB data and new PDF data were not handled properly.
+
+I changed the app so that when the app starts, it creates a fresh index from the PDFs already in the documents folder.
+
+When I upload a new PDF, the app automatically saves it and indexes only that new PDF.
+
+When I delete a PDF, the app also deletes its related chunks and embeddings from ChromaDB.
 
 ### 5. Answers sometimes got cut off
 A few times, the answer was incomplete or messy instead of clean. I fixed this by

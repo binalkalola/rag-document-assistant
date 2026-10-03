@@ -10,19 +10,20 @@ embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 # Connect to the SAME ChromaDB folder where we already stored our chunks
 chroma_client = chromadb.PersistentClient(path="chroma_db")
 
-# Get the SAME collection (not creating a new one, just connecting to existing data)
-collection = chroma_client.get_or_create_collection(name="rag_documents")
 
 # This function takes a question, embeds it, and finds the most similar chunks
 def retrieve_top_chunks(question, top_k=3):
     # Convert the question into an embedding, same way we did for chunks
     question_embedding = embedding_model.encode(question).tolist()
 
+    collection = chroma_client.get_collection(name="rag_documents")
+
     # Ask ChromaDB to find the most similar chunks to this question
     results = collection.query(
         query_embeddings=[question_embedding], 
         n_results=top_k
     )
+    print(results["documents"][0])
     return results
 # This function nicely prints the retrieved chunks, showing filename and page
 # This function nicely prints the retrieved chunks, showing filename and page

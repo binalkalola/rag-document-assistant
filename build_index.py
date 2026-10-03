@@ -1,97 +1,379 @@
-# Import our own function from ingestion.py to extract text from PDFs
+
+# Extract text page-by-page from PDF
 from ingestion import extract_text_from_pdf
-# Import our own function from chunking.py to split text into chunks
+
+# Split extracted text into smaller overlapping chunks
 from chunking import split_text_into_chunks
-# Import os to work with files and folders
+
+# Used for working with files and folders
 import os
-# SentenceTransformer converts text into embeddings (numbers)
+
+# SentenceTransformer is used to convert text into embeddings
 from sentence_transformers import SentenceTransformer
-# chromadb is our vector database to store and search embeddings
+
+# ChromaDB is used to store and search embeddings
 import chromadb
 
-# Load the embedding model once (this may take a few seconds the first time)
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
-# Create a ChromaDB client that saves data to disk (so it persists between runs)
-chroma_client = chromadb.PersistentClient(path="chroma_db")
+# ============================================================
+# 1. LOAD EMBEDDING MODEL
+# ============================================================
 
-# A "collection" in ChromaDB is like a table - it holds our chunks and their embeddings
-collection = chroma_client.get_or_create_collection(name="rag_documents")
+# IMPORTANT:
+# The same embedding model must be used for:
+# 1. Document chunks
+# 2. User questions
+#
+# This model converts text into numerical vectors (embeddings).
+embedding_model = SentenceTransformer(
+    "all-MiniLM-L6-v2"
+)
 
-# This function processes ALL PDFs in the documents folder
-# and returns a single list containing chunks from every PDF, every page
+
+# ============================================================
+# 2. CONNECT TO CHROMADB
+# ============================================================
+
+# PersistentClient stores ChromaDB data on disk.
+#
+# "chroma_db" is the folder where our vector database is stored.
+chroma_client = chromadb.PersistentClient(
+    path="chroma_db"
+)
+
+
+# Get the existing collection.
+# If the collection does not exist, create it.
+collection = chroma_client.get_or_create_collection(
+    name="rag_documents"
+)
+
+
+# ============================================================
+# 3. RESET ENTIRE COLLECTION
+# ============================================================
+
+def reset_collection():
+    """
+    Delete the complete ChromaDB collection and create
+    a fresh empty collection.
+
+    This is useful when starting a completely fresh index.
+    """
+
+    global collection
+
+    # Try to delete the existing collection.
+    try:
+        chroma_client.delete_collection(
+            name="rag_documents"
+        )
+
+    except Exception:
+        # If the collection does not exist,
+        # simply continue.
+        pass
+
+    # Create a new empty collection.
+    collection = chroma_client.get_or_create_collection(
+        name="rag_documents"
+    )
+
+    print("ChromaDB collection reset successfully.")
+
+
+# ============================================================
+# 4. BUILD CHUNKS FROM ALL PDF FILES
+# ============================================================
+
 def build_all_chunks(documents_folder):
-    # This list will hold chunks from every PDF combined together
+    """
+    Read all PDF files from the documents folder,
+    extract their text page-by-page,
+    split the text into chunks,
+    and return all chunks with metadata.
+    """
+
+    # This list will contain chunks from all PDFs.
     all_chunks = []
 
-    # Get a list of all files in the documents folder, but keep only PDF files
-    # (this skips any non-PDF files that might accidentally be in the folder)
-    pdf_files = [f for f in os.listdir(documents_folder) if f.endswith(".pdf")]
-    # Loop through every PDF file found in the documents folder
+    # Get all PDF filenames from the documents folder.
+    pdf_files = [
+        filename
+        for filename in os.listdir(documents_folder)
+        if filename.lower().endswith(".pdf")
+    ]
+
+    # Process every PDF.
     for filename in pdf_files:
-        # Build the full path to this PDF (folder name + file name)
-        pdf_path = os.path.join(documents_folder, filename)
-        print(f"\nProcessing file: {pdf_path}")
-        # Use our ingestion.py function to extract text, page by page
-        pages = extract_text_from_pdf(pdf_path)
-        # Now loop through each page of THIS pdf
+
+        # Create the complete PDF path.
+        pdf_path = os.path.join(
+            documents_folder,
+            filename
+        )
+
+        print(
+            f"\nProcessing file: {pdf_path}"
+        )
+
+        # Extract text page-by-page.
+        pages = extract_text_from_pdf(
+            pdf_path
+        )
+
+        # Process every page.
         for page in pages:
-            # Use our chunking.py function to split this page's text into chunks
-            page_chunks = split_text_into_chunks(page["text"])
 
-            # Loop through each chunk created from this page
+            # Split page text into smaller chunks.
+            #
+            # Your chunking.py currently uses:
+            # chunk_size = 80 words
+            # overlap = 20 words
+            page_chunks = split_text_into_chunks(
+                page["text"]
+            )
+
+            # Store every chunk with metadata.
             for chunk in page_chunks:
-                # Store the chunk along with useful metadata:
-                # which file it came from, and which page number
-                all_chunks.append({
-                    "text" : chunk,
-                    "filename" : filename,
-                    "page_number" : page["page_number"]
-                })
 
+                all_chunks.append({
+                    "text": chunk,
+                    "filename": filename,
+                    "page_number": page["page_number"]
+                })
 
     return all_chunks
 
-# This function takes our list of chunks and stores them in ChromaDB
-# along with their embeddings and metadata
+
+# ============================================================
+# 5. STORE CHUNKS + EMBEDDINGS IN CHROMADB
+# ============================================================
+
 def store_chunks_in_chromadb(chunks):
-    # Loop through every chunk, keeping track of its position (index)
+    """
+    Convert each chunk into an embedding and store it
+    in ChromaDB along with the original text and metadata.
+    """
+
+    # Process every chunk.
     for i, chunk in enumerate(chunks):
-        # Convert this chunk's text into an embedding (a list of numbers)
-        embedding = embedding_model.encode(chunk["text"]).tolist()
-        # Add this chunk to the ChromaDB collection
+
+        # Convert chunk text into an embedding.
+        #
+        # .tolist() converts the NumPy array into
+        # a normal Python list for ChromaDB.
+        embedding = embedding_model.encode(
+            chunk["text"]
+        ).tolist()
+
+        # ----------------------------------------------------
+        # Create a UNIQUE ID for this chunk.
+        #
+        # Example:
+        # Course_Handbook.pdf_page_2_chunk_15
+        #
+        # This prevents ID conflicts when adding new PDFs.
+        # ----------------------------------------------------
+
+        chunk_id = (
+            f"{chunk['filename']}_"
+            f"page_{chunk['page_number']}_"
+            f"chunk_{i}"
+        )
+
+        # Add the chunk to ChromaDB.
         collection.add(
-            ids=[str(i)],                     # a unique ID for this chunk (must be a string)
-            embeddings=[embedding],           # the embedding we just created
-            documents=[chunk["text"]],        # the actual chunk text
-            metadatas=[{                      # extra info about this chunk
+            ids=[chunk_id],
+
+            # Numerical vector representation
+            embeddings=[embedding],
+
+            # Original text
+            documents=[chunk["text"]],
+
+            # Information about where the chunk came from
+            metadatas=[{
                 "filename": chunk["filename"],
                 "page_number": chunk["page_number"]
             }]
         )
-        # Print progress every 10 chunks so we know it's working
+
+        # Print progress after every 10 chunks.
         if i % 10 == 0:
-            print(f"Stored chunk {i + 1} of {len(chunks)}")
-    print(f"\nAll {len(chunks)} chunks stored in ChromaDB successfully!")
-# This block runs only when this file is executed directly
-if __name__ == "__main__":
-    # Build chunks from all PDFs in the documents folder
-    chunks = build_all_chunks("documents")
+            print(
+                f"Stored chunk {i + 1} "
+                f"of {len(chunks)}"
+            )
 
-    # Print a summary
-    print(f"\n{'='*50}")
-    print(f"Total chunks created from all PDFs: {len(chunks)}")
+    print(
+        f"\nAll {len(chunks)} chunks "
+        f"stored in ChromaDB successfully!"
+    )
 
-    # Show the first chunk as a sample, to inspect it
+
+# ============================================================
+# 6. INDEX ONLY ONE PDF
+# ============================================================
+
+def index_single_pdf(pdf_path):
+    """
+    Extract, chunk, embed and store only one PDF.
+
+    This function is useful when a NEW PDF is uploaded.
+    We don't need to re-index all existing PDFs.
+    """
+
+    # Get only the filename from the complete path.
+    filename = os.path.basename(
+        pdf_path
+    )
+
+    print(
+        f"\nIndexing new PDF: {filename}"
+    )
+
+    # Extract text from the PDF.
+    pages = extract_text_from_pdf(
+        pdf_path
+    )
+
+    # Store chunks for this PDF.
+    chunks = []
+
+    # Process every page.
+    for page in pages:
+
+        # Split page text into chunks.
+        page_chunks = split_text_into_chunks(
+            page["text"]
+        )
+
+        # Store each chunk with metadata.
+        for chunk in page_chunks:
+
+            chunks.append({
+                "text": chunk,
+                "filename": filename,
+                "page_number": page["page_number"]
+            })
+
+    # If chunks were successfully created,
+    # create embeddings and store them.
     if chunks:
-        print(f"\n--- Sample Chunk ---")
-        print(f"From file: {chunks[0]['filename']}, Page: {chunks[0]['page_number']}")
-        print(f"Text: {chunks[0]['text'][:300]}")
-        # Now store all these chunks into ChromaDB with their embeddings
-    
-    print(f"\n{'='*50}")
-    print("Creating embeddings and storing in ChromaDB...")
-    store_chunks_in_chromadb(chunks)
 
-    # Verify how many items are now in the collection
-    print(f"\nTotal items in ChromaDB collection: {collection.count()}")
+        store_chunks_in_chromadb(
+            chunks
+        )
+
+    print(
+        f"Indexed {len(chunks)} chunks "
+        f"from {filename}"
+    )
+
+    return len(chunks)
+
+
+# ============================================================
+# 7. DELETE ONE PDF'S CHUNKS FROM CHROMADB
+# ============================================================
+
+def delete_document_from_chromadb(filename):
+    """
+    Delete ONLY the chunks belonging to the specified PDF.
+
+    Other PDFs and their embeddings remain untouched.
+    """
+
+    global collection
+
+    # Get stored metadata from ChromaDB.
+    data = collection.get(
+        include=["metadatas"]
+    )
+
+    # This list will contain IDs of the PDF's chunks.
+    ids_to_delete = []
+
+    # Check every stored record.
+    for i, metadata in enumerate(
+        data["metadatas"]
+    ):
+
+        # Compare the stored filename
+        # with the PDF we want to delete.
+        if metadata.get("filename") == filename:
+
+            # Save that chunk's ID.
+            ids_to_delete.append(
+                data["ids"][i]
+            )
+
+    # If matching chunks were found,
+    # delete only those chunks.
+    if ids_to_delete:
+
+        collection.delete(
+            ids=ids_to_delete
+        )
+
+        print(
+            f"Deleted {len(ids_to_delete)} "
+            f"chunks for {filename}"
+        )
+
+    else:
+
+        print(
+            f"No ChromaDB chunks found "
+            f"for {filename}"
+        )
+
+
+# ============================================================
+# 8. TEST FULL INDEXING
+# ============================================================
+
+# This section runs only when:
+#
+# python build_index.py
+#
+# is executed directly from the terminal.
+#
+# It does NOT run when another file imports
+# build_index.py.
+if __name__ == "__main__":
+
+    # --------------------------------------------------------
+    # Start with a completely fresh ChromaDB collection.
+    # --------------------------------------------------------
+    reset_collection()
+
+    # --------------------------------------------------------
+    # Read all PDFs currently present in documents/
+    # --------------------------------------------------------
+    chunks = build_all_chunks(
+        "documents"
+    )
+
+    print(
+        f"\nTotal chunks created: "
+        f"{len(chunks)}"
+    )
+
+    # --------------------------------------------------------
+    # Create embeddings and store all chunks.
+    # --------------------------------------------------------
+    if chunks:
+
+        store_chunks_in_chromadb(
+            chunks
+        )
+
+    # --------------------------------------------------------
+    # Show final number of records in ChromaDB.
+    # --------------------------------------------------------
+    print(
+        f"\nTotal items in ChromaDB: "
+        f"{collection.count()}"
+    )
