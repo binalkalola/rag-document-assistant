@@ -69,7 +69,7 @@ making up an answer.
 All 15 answerable questions got the correct passage and a correct answer with the
 right file and page. All 5 unanswerable questions correctly said "not found."
 
-**Final Result: 20 / 20 correct (100%)**
+**Final Result: 20 / 20 correct (100%)** on this test set
 
 ---
 
